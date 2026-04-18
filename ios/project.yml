@@ -28,7 +28,7 @@ targets:
           - "**/.DS_Store"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.welsonslee.iosagent
+        PRODUCT_BUNDLE_IDENTIFIER: com.welsonslee.iosagent.dev
         INFOPLIST_FILE: iosagent/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
