@@ -1,4 +1,4 @@
-name: 🍎 Build iOS IPA (Free - No Paid Cert)
+name: 🍎 Build iOS IPA (SideStore Ready)
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  PYTHON_VERSION: "3.12"
-  BRIEFCASE_VERSION: "0.4.0"
+  XCODE_VERSION: "15.0"
+  IOS_VERSION: "15.0"
 
 jobs:
   # ── 代码检查 ──────────────────────────────────
@@ -18,12 +18,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check src/ --output-format=github
+      - run: ruff check ios/ --output-format=github
 
-  # ── 构建 IPA（SideStore 免费安装）───────────────
-  build-ipa:
+  # ── 构建 IPA ──────────────────────────────────
+  build:
     name: 📱 构建 IPA
     runs-on: macos-latest
     needs: lint
@@ -32,100 +32,114 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: 查看 Xcode 和可用模拟器
+      - name: 诊断环境
         run: |
-          echo "=== Xcode 版本 ==="
-          xcode-select --print-path
-          xcodebuild -version
+          echo "=== macOS ==="
+          sw_vers
           echo ""
-          echo "=== 可用 SDK ==="
-          xcodebuild -showsdks
+          echo "=== Xcode ==="
+          xcodebuild -version
+          xcode-select --print-path
           echo ""
           echo "=== 可用模拟器 ==="
-          xcrun simctl list devices available | grep -E "iPhone|iPad"
+          xcrun simctl list devices available | grep -E "iPhone" | head -5
 
-      - name: 安装 Briefcase
-        run: pip install briefcase==${{ env.BRIEFCASE_VERSION }}
-
-      - name: 创建 iOS 项目
-        run: briefcase create iOS --no-input
-
-      - name: 查看生成的项目结构
+      - name: 安装 XcodeGen
         run: |
-          echo "=== iOS 目录结构 ==="
-          ls -la build/iosagent/iOS/
-          echo ""
-          echo "=== 查找 Xcode 项目 ==="
-          find build/iosagent/iOS -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
+          which xcodegen || echo "需要安装 XcodeGen"
+          brew install xcodegen 2>/dev/null || {
+            echo "Homebrew 安装失败，尝试直接下载..."
+            curl -sL https://github.com/SnapKit/XcodeGen/releases/download/2.39.0/xcodegen-macos.zip -o xcodegen.zip
+            unzip -o xcodegen.zip -d /usr/local/bin/
+            chmod +x /usr/local/bin/xcodegen
+          }
+          xcodegen --version
 
-      - name: 构建 Xcode 项目
+      - name: 生成 Xcode 项目
+        run: |
+          cd ios
+          xcodegen generate
+          echo "=== 生成的项目 ==="
+          ls -la
+          ls -la iosagent/ 2>/dev/null || true
+
+      - name: 列出可用 Scheme
+        run: |
+          cd ios
+          XCODEPROJ=$(find . -name "*.xcodeproj" | head -1)
+          echo "项目: $XCODEPROJ"
+          xcodebuild -project "$XCODEPROJ" -list || true
+
+      - name: 构建项目
         id: build
         run: |
-          cd build/iosagent/iOS
-          
-          # 查找 Xcode 项目
+          cd ios
           XCODEPROJ=$(find . -name "*.xcodeproj" | head -1)
-          echo "找到项目: $XCODEPROJ"
-          
-          # 列出所有 scheme
-          echo "=== 可用 Scheme ==="
-          xcodebuild -project "$XCODEPROJ" -list
-          
-          # 获取 scheme 名称
-          SCHEME=$(xcodebuild -project "$XCODEPROJ" -list | grep -A1 "Schemes:" | tail -1 | tr -d ' ')
-          echo "使用 Scheme: $SCHEME"
-          
-          # 获取可用 iPhone 模拟器
-          DESTINATION=$(xcrun simctl list devices available | grep "iPhone" | head -1 | sed 's/.*(\(.*\)).*/\1/' | tr -d ' ')
-          if [ -z "$DESTINATION" ]; then
-            DESTINATION="platform=iOS Simulator,name=iPhone 15"
-          fi
-          echo "使用目标: $DESTINATION"
-          
-          # 构建
-          echo "=== 开始构建 ==="
+          SCHEME=$(xcodebuild -project "$XCODEPROJ" -list 2>/dev/null | grep -A1 "Schemes:" | tail -1 | tr -d ' ')
+          echo "构建 Scheme: $SCHEME"
+
+          # 直接构建为 .app（模拟器版本）
           xcodebuild -project "$XCODEPROJ" \
             -scheme "$SCHEME" \
             -configuration Debug \
-            -destination generic/platform=iOS\ Simulator \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO 2>&1 | tail -50
-          
-          echo "=== 构建完成 ==="
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tee build.log
+
+          echo ""
+          echo "=== 构建日志末尾 ==="
+          tail -30 build.log
+
+          # 检查构建是否成功
+          if grep -q "BUILD SUCCEEDED" build.log; then
+            echo "✅ 构建成功"
+          else
+            echo "❌ 构建失败"
+            exit 1
+          fi
 
       - name: 查找构建产物
         run: |
-          echo "=== 查找 .app 文件 ==="
-          find build -name "*.app" -type d 2>/dev/null
-          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
+          APP_PATH=$(find ios/build -name "*.app" -type d 2>/dev/null | head -1)
           echo "APP_PATH=$APP_PATH"
-          echo "APP_SIZE=$(du -sh "$APP_PATH" 2>/dev/null || echo 'unknown')"
+          if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
+            echo "✅ 找到 App: $APP_PATH"
+            echo "App 大小: $(du -sh "$APP_PATH")"
+            ls -la "$APP_PATH/"
+          else
+            echo "❌ 未找到 .app"
+            find ios/build -type d | head -20
+            exit 1
+          fi
 
       - name: 打包 IPA
         run: |
-          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
-          
+          APP_PATH=$(find ios/build -name "*.app" -type d 2>/dev/null | head -1)
+
           if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "❌ 未找到 .app 文件，构建可能失败了"
-            echo "尝试查看 build 目录内容..."
-            ls -la build/ 2>/dev/null || echo "build 目录不存在"
+            echo "❌ 未找到 .app 文件"
             exit 1
           fi
-          
-          echo "✅ 找到 App: $APP_PATH"
+
+          echo "✅ 打包: $APP_PATH"
+
           IPA_DIR="$RUNNER_TEMP/ipa_payload"
           mkdir -p "$IPA_DIR/Payload"
           cp -R "$APP_PATH" "$IPA_DIR/Payload/"
+
+          # 复制 Info.plist 到根目录
+          cp ios/iosagent/Info.plist "$IPA_DIR/" 2>/dev/null || true
+
           cd "$IPA_DIR"
           zip -r "$RUNNER_TEMP/iOS-Agent.ipa" .
-          echo "✅ IPA 大小: $(du -sh $RUNNER_TEMP/iOS-Agent.ipa)"
+          echo ""
+          echo "✅ IPA 生成成功！"
+          echo "IPA 大小: $(du -sh $RUNNER_TEMP/iOS-Agent.ipa)"
+          ls -la "$RUNNER_TEMP/iOS-Agent.ipa"
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
