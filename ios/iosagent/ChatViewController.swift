@@ -127,7 +127,7 @@ class ChatViewController: UIViewController {
     
     // MARK: - Setup
     private func setupUI() {
-        title = "iOS Agent"
+        title = "iOSAgent"
         view.backgroundColor = .systemGroupedBackground
         
         // Navigation bar appearance
