@@ -1,0 +1,52 @@
+# Git 忽略配置
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Briefcase 构建产物
+build/
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# iOS / Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# 证书和密钥（绝对不能提交！）
+*.p12
+*.mobileprovision
+*.pem
+*.p8
+AuthKey*.p8
+api_key.json
+
+# 环境变量
+.env
+.env.local
+*.env
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.log

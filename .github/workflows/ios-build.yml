@@ -1,0 +1,235 @@
+name: 🍎 Build iOS Agent
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*.*.*"          # 打 tag 时触发正式构建
+  pull_request:
+    branches: [main]
+  workflow_dispatch:       # 支持手动触发
+    inputs:
+      build_type:
+        description: "构建类型"
+        required: true
+        default: "simulator"
+        type: choice
+        options:
+          - simulator      # 模拟器构建（免证书）
+          - device         # 真机构建（需要证书）
+
+# ─────────────────────────────────────────────────────────
+# 环境变量（在 GitHub Repo → Settings → Secrets 中配置）
+# ─────────────────────────────────────────────────────────
+env:
+  PYTHON_VERSION: "3.12"
+  BRIEFCASE_VERSION: "0.3.19"
+
+jobs:
+  # ══════════════════════════════════════════
+  # Job 1: 代码质量检查（在 ubuntu 上跑，节省 macOS 分钟数）
+  # ══════════════════════════════════════════
+  lint:
+    name: 🔍 代码检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装检查工具
+        run: pip install ruff
+
+      - name: 运行 Ruff 检查
+        run: ruff check src/ --output-format=github
+
+  # ══════════════════════════════════════════
+  # Job 2: iOS 模拟器构建（免 Apple 证书）
+  # ══════════════════════════════════════════
+  build-simulator:
+    name: 📱 iOS 模拟器构建
+    runs-on: macos-latest          # GitHub 提供的 macOS runner（含 Xcode）
+    needs: lint
+    if: github.event.inputs.build_type != 'device'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: 查看 Xcode 版本
+        run: |
+          xcode-select --print-path
+          xcodebuild -version
+
+      - name: 安装 Briefcase
+        run: pip install briefcase==${{ env.BRIEFCASE_VERSION }}
+
+      - name: 创建 iOS 项目（Briefcase）
+        run: briefcase create iOS
+
+      - name: 构建 iOS 项目
+        run: briefcase build iOS
+
+      - name: 上传模拟器构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-agent-simulator-${{ github.sha }}
+          path: |
+            build/iosagent/iOS/
+          retention-days: 7
+
+  # ══════════════════════════════════════════
+  # Job 3: 真机构建 + TestFlight 发布
+  # 需要在 GitHub Secrets 中配置以下变量：
+  #   BUILD_CERTIFICATE_BASE64   - p12 证书 base64
+  #   P12_PASSWORD               - 证书密码
+  #   BUILD_PROVISION_PROFILE_BASE64 - 描述文件 base64
+  #   KEYCHAIN_PASSWORD          - 临时钥匙串密码（随便填）
+  #   APP_STORE_CONNECT_API_KEY  - App Store Connect API Key JSON
+  # ══════════════════════════════════════════
+  build-device:
+    name: 🚀 真机构建 & TestFlight 发布
+    runs-on: macos-latest
+    needs: lint
+    if: |
+      github.event.inputs.build_type == 'device' ||
+      startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: 安装 Briefcase
+        run: pip install briefcase==${{ env.BRIEFCASE_VERSION }}
+
+      # ── 安装签名证书 ──────────────────────────
+      - name: 安装 Apple 签名证书
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # 解码证书
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+          # 创建临时钥匙串
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # 导入证书
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # 安装描述文件
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+
+      # ── Briefcase 构建 ────────────────────────
+      - name: 创建 iOS 项目
+        run: briefcase create iOS
+
+      - name: 构建 iOS App（签名）
+        run: briefcase build iOS --device
+
+      # ── 打包 IPA ─────────────────────────────
+      - name: 导出 IPA
+        run: |
+          APP_PATH=$(find build/iosagent/iOS -name "*.app" | head -1)
+          mkdir -p artifacts
+          cd artifacts
+          # 使用 xcodebuild 导出 ipa
+          xcodebuild -exportArchive \
+            -archivePath "../build/iosagent/iOS/iOS Agent.xcarchive" \
+            -exportPath . \
+            -exportOptionsPlist "../ios/ExportOptions.plist" \
+            || echo "Archive export - checking build products"
+          ls -la
+
+      # ── 上传到 TestFlight ─────────────────────
+      - name: 上传到 TestFlight（App Store Connect）
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          # 将 API Key 写入文件
+          echo "$APP_STORE_CONNECT_API_KEY" > /tmp/api_key.json
+          KEY_ID=$(cat /tmp/api_key.json | python3 -c "import json,sys; print(json.load(sys.stdin)['key_id'])")
+          ISSUER_ID=$(cat /tmp/api_key.json | python3 -c "import json,sys; print(json.load(sys.stdin)['issuer_id'])")
+          KEY_FILE=$(cat /tmp/api_key.json | python3 -c "import json,sys; d=json.load(sys.stdin); open('/tmp/AuthKey.p8','w').write(d['private_key']); print('/tmp/AuthKey.p8')")
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file artifacts/*.ipa \
+            --apiKey "$KEY_ID" \
+            --apiIssuer "$ISSUER_ID" \
+            --private-key-path "$KEY_FILE"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-agent-device-${{ github.sha }}
+          path: artifacts/
+          retention-days: 30
+
+      # ── 清理证书 ──────────────────────────────
+      - name: 清理签名证书
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+
+  # ══════════════════════════════════════════
+  # Job 4: 发布 Release（打 tag 时）
+  # ══════════════════════════════════════════
+  release:
+    name: 📦 创建 GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-device
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ios-agent-device-*
+          merge-multiple: true
+          path: release-assets/
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          body: |
+            ## iOS Agent ${{ github.ref_name }}
+            
+            ### 安装方式
+            - **TestFlight**: 已自动上传，等待 Apple 审核后可加入测试
+            - **模拟器**: 下载 `ios-agent-simulator-*.zip` 在 Xcode 模拟器运行
+            
+            ### 更新内容
+            见下方自动生成的 Release Notes
