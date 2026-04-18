@@ -139,7 +139,10 @@ jobs:
           fi
 
       - name: 打包 IPA
+        env:
+          APP_NAME: iosagent
         run: |
+          # 找到 .app 路径
           APP_PATH=$(find ios/build -name "*.app" -type d 2>/dev/null | head -1)
 
           if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
@@ -147,34 +150,64 @@ jobs:
             exit 1
           fi
 
-          echo "✅ 打包: $APP_PATH"
+          echo "✅ 找到 App: $APP_PATH"
           
-          # 输出 App 信息
-          echo "=== App Bundle Info ==="
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist" 2>/dev/null || echo "无法读取 Bundle ID"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$APP_PATH/Info.plist" 2>/dev/null || echo "无法读取 Bundle Name"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist" 2>/dev/null || echo "无法读取 Version"
-
+          # 获取 App 名称
+          APP_BUNDLE_NAME=$(basename "$APP_PATH")
+          echo "App Bundle Name: $APP_BUNDLE_NAME"
+          
           # App 大小
-          echo ""
           echo "=== App 大小 ==="
           du -sh "$APP_PATH"
 
-          IPA_DIR="$RUNNER_TEMP/ipa_payload"
+          # 创建打包目录
+          IPA_DIR="$RUNNER_TEMP/ios_ipa"
           rm -rf "$IPA_DIR"
           mkdir -p "$IPA_DIR/Payload"
+          
+          # 复制 App 到 Payload
           cp -R "$APP_PATH" "$IPA_DIR/Payload/"
-
+          
           echo ""
-          echo "=== IPA 目录结构 ==="
+          echo "=== Payload 结构 ==="
           ls -la "$IPA_DIR/Payload/"
 
-          # 正确打包：进入 Payload 目录，只打包其内容
-          cd "$IPA_DIR/Payload"
-          zip -r "$RUNNER_TEMP/iOS-Agent.ipa" .
+          # 使用 python 的 zipfile 模块打包，确保结构正确
+          python3 << 'PYEOF'
+          import zipfile
+          import os
+          import sys
+          
+          ipa_dir = os.environ['IPA_DIR']
+          output_ipa = os.path.join(os.environ['RUNNER_TEMP'], 'iOS-Agent.ipa')
+          app_bundle = os.environ['APP_NAME'] + '.app'
+          
+          with zipfile.ZipFile(output_ipa, 'w', zipfile.ZIP_DEFLATED) as zf:
+              payload_path = os.path.join(ipa_dir, 'Payload')
+              app_path = os.path.join(payload_path, app_bundle)
+              
+              for root, dirs, files in os.walk(app_path):
+                  for file in files:
+                      file_path = os.path.join(root, file)
+                      arcname = os.path.join('Payload', app_bundle, os.path.relpath(file_path, app_path))
+                      zf.write(file_path, arcname)
+                      print(f"  Added: {arcname}")
+          
+          print(f"\n✅ IPA created: {output_ipa}")
+          
+          # Check size
+          import os
+          size = os.path.getsize(output_ipa)
+          print(f"IPA size: {size / 1024 / 1024:.2f} MB")
+          
+          if size < 1000000:
+              print("⚠️ WARNING: IPA seems too small!")
+              sys.exit(1)
+          PYEOF
+          
           echo ""
-          echo "✅ IPA 生成成功！"
-          echo "IPA 大小: $(du -sh $RUNNER_TEMP/iOS-Agent.ipa)"
+          echo "✅ IPA 打包完成"
+          ls -la "$RUNNER_TEMP/iOS-Agent.ipa"
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
