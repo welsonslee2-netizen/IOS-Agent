@@ -7,7 +7,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.12"
-  BRIEFCASE_VERSION: "0.3.19"
+  BRIEFCASE_VERSION: "0.4.0"
 
 jobs:
   # ── 代码检查 ──────────────────────────────────
@@ -38,11 +38,17 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: 查看 Xcode
+      - name: 查看 Xcode 和可用模拟器
         run: |
+          echo "=== Xcode 版本 ==="
           xcode-select --print-path
           xcodebuild -version
+          echo ""
+          echo "=== 可用 SDK ==="
           xcodebuild -showsdks
+          echo ""
+          echo "=== 可用模拟器 ==="
+          xcrun simctl list devices available | grep -E "iPhone|iPad"
 
       - name: 安装 Briefcase
         run: pip install briefcase==${{ env.BRIEFCASE_VERSION }}
@@ -50,20 +56,76 @@ jobs:
       - name: 创建 iOS 项目
         run: briefcase create iOS --no-input
 
-      - name: 构建 iOS 应用
-        run: briefcase build iOS --no-input
+      - name: 查看生成的项目结构
+        run: |
+          echo "=== iOS 目录结构 ==="
+          ls -la build/iosagent/iOS/
+          echo ""
+          echo "=== 查找 Xcode 项目 ==="
+          find build/iosagent/iOS -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
 
-      # ── 打包成 IPA（用于 SideStore）───────────────
+      - name: 构建 Xcode 项目
+        id: build
+        run: |
+          cd build/iosagent/iOS
+          
+          # 查找 Xcode 项目
+          XCODEPROJ=$(find . -name "*.xcodeproj" | head -1)
+          echo "找到项目: $XCODEPROJ"
+          
+          # 列出所有 scheme
+          echo "=== 可用 Scheme ==="
+          xcodebuild -project "$XCODEPROJ" -list
+          
+          # 获取 scheme 名称
+          SCHEME=$(xcodebuild -project "$XCODEPROJ" -list | grep -A1 "Schemes:" | tail -1 | tr -d ' ')
+          echo "使用 Scheme: $SCHEME"
+          
+          # 获取可用 iPhone 模拟器
+          DESTINATION=$(xcrun simctl list devices available | grep "iPhone" | head -1 | sed 's/.*(\(.*\)).*/\1/' | tr -d ' ')
+          if [ -z "$DESTINATION" ]; then
+            DESTINATION="platform=iOS Simulator,name=iPhone 15"
+          fi
+          echo "使用目标: $DESTINATION"
+          
+          # 构建
+          echo "=== 开始构建 ==="
+          xcodebuild -project "$XCODEPROJ" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination generic/platform=iOS\ Simulator \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO 2>&1 | tail -50
+          
+          echo "=== 构建完成 ==="
+
+      - name: 查找构建产物
+        run: |
+          echo "=== 查找 .app 文件 ==="
+          find build -name "*.app" -type d 2>/dev/null
+          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
+          echo "APP_PATH=$APP_PATH"
+          echo "APP_SIZE=$(du -sh "$APP_PATH" 2>/dev/null || echo 'unknown')"
+
       - name: 打包 IPA
         run: |
-          APP_PATH=$(find build/iosagent/iOS -name "*.app" -maxdepth 2 | head -1)
-          echo "APP_PATH=$APP_PATH"
+          APP_PATH=$(find build -name "*.app" -type d 2>/dev/null | head -1)
+          
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "❌ 未找到 .app 文件，构建可能失败了"
+            echo "尝试查看 build 目录内容..."
+            ls -la build/ 2>/dev/null || echo "build 目录不存在"
+            exit 1
+          fi
+          
+          echo "✅ 找到 App: $APP_PATH"
           IPA_DIR="$RUNNER_TEMP/ipa_payload"
           mkdir -p "$IPA_DIR/Payload"
           cp -R "$APP_PATH" "$IPA_DIR/Payload/"
           cd "$IPA_DIR"
           zip -r "$RUNNER_TEMP/iOS-Agent.ipa" .
-          ls -lh "$RUNNER_TEMP/iOS-Agent.ipa"
+          echo "✅ IPA 大小: $(du -sh $RUNNER_TEMP/iOS-Agent.ipa)"
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
@@ -71,20 +133,3 @@ jobs:
           name: iOS-Agent-IPA
           path: ${{ runner.temp }}/iOS-Agent.ipa
           retention-days: 30
-
-  # ── 失败通知 ──────────────────────────────────
-  notify:
-    name: 📬 构建完成通知
-    runs-on: ubuntu-latest
-    needs: build-ipa
-    if: always()
-    steps:
-      - name: 检查结果
-        run: |
-          if [ "${{ needs.build-ipa.result }}" == "success" ]; then
-            echo "✅ iOS Agent IPA 构建成功！"
-            echo "请下载 artifacts 中的 iOS-Agent.ipa 文件"
-            echo "然后使用 SideStore 安装到 iPhone"
-          else
-            echo "❌ 构建失败，请检查日志"
-          fi
