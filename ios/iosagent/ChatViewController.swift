@@ -161,7 +161,7 @@ class ChatViewController: UIViewController {
             quickActionsStack.topAnchor.constraint(equalTo: toolbarView.topAnchor, constant: 8),
             quickActionsStack.leadingAnchor.constraint(equalTo: toolbarView.leadingAnchor, constant: 16),
             quickActionsStack.trailingAnchor.constraint(equalTo: toolbarView.trailingAnchor, constant: -16),
-            quickActionsStack.heightAnchor.constraint(equalToConstant: 36),
+            quickActionsStack.heightAnchor.constraint(equalToConstant: 48),
             
             inputContainer.topAnchor.constraint(equalTo: quickActionsStack.bottomAnchor, constant: 8),
             inputContainer.leadingAnchor.constraint(equalTo: toolbarView.leadingAnchor),
@@ -193,13 +193,16 @@ class ChatViewController: UIViewController {
         let btn = UIButton(type: .system)
         btn.translatesAutoresizingMaskIntoConstraints = false
         
-        var config = UIButton.Configuration.plain()
-        config.image = UIImage(systemName: icon)
-        config.title = title
-        config.imagePadding = 4
-        config.imagePlacement = .top
-        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 18)
-        btn.configuration = config
+        // 使用 SF Symbols 图标
+        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+        btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
+        btn.setTitle(title, for: .normal)
+        btn.titleLabel?.font = .systemFont(ofSize: 12, weight: .medium)
+        
+        // 水平和垂直布局
+        btn.configuration = nil  // 清除 configuration，使用传统方式
+        btn.contentEdgeInsets = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        btn.titleEdgeInsets = UIEdgeInsets(top: 0, left: 4, bottom: 0, right: -4)
         
         return btn
     }
