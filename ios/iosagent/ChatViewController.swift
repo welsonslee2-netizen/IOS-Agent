@@ -154,25 +154,30 @@ class ChatViewController: UIViewController {
         inputContainerBottom = inputContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         
         NSLayoutConstraint.activate([
+            // toolbarView 从 safeArea 底部向上延伸
+            toolbarView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -120),
             toolbarView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbarView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            inputContainerBottom!,
+            toolbarView.heightAnchor.constraint(equalToConstant: 120),
             
+            // quickActionsStack 固定高度
             quickActionsStack.topAnchor.constraint(equalTo: toolbarView.topAnchor, constant: 8),
             quickActionsStack.leadingAnchor.constraint(equalTo: toolbarView.leadingAnchor, constant: 16),
             quickActionsStack.trailingAnchor.constraint(equalTo: toolbarView.trailingAnchor, constant: -16),
-            quickActionsStack.heightAnchor.constraint(equalToConstant: 48),
+            quickActionsStack.heightAnchor.constraint(equalToConstant: 44),
             
+            // inputContainer 固定高度
             inputContainer.topAnchor.constraint(equalTo: quickActionsStack.bottomAnchor, constant: 8),
             inputContainer.leadingAnchor.constraint(equalTo: toolbarView.leadingAnchor),
             inputContainer.trailingAnchor.constraint(equalTo: toolbarView.trailingAnchor),
+            inputContainer.heightAnchor.constraint(equalToConstant: 50),
+            inputContainerBottom!,
             
             textView.topAnchor.constraint(equalTo: inputContainer.topAnchor, constant: 4),
             textView.leadingAnchor.constraint(equalTo: inputContainer.leadingAnchor, constant: 12),
             textView.trailingAnchor.constraint(equalTo: inputContainer.trailingAnchor, constant: -12),
-            textView.bottomAnchor.constraint(equalTo: inputContainer.bottomAnchor, constant: -8),
-            textView.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
-            textView.heightAnchor.constraint(lessThanOrEqualToConstant: 120),
+            textView.bottomAnchor.constraint(equalTo: inputContainer.bottomAnchor, constant: -4),
+            textView.heightAnchor.constraint(equalToConstant: 40),
             
             sendButton.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: -8),
             sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: -6),
