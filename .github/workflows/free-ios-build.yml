@@ -155,6 +155,11 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$APP_PATH/Info.plist" 2>/dev/null || echo "无法读取 Bundle Name"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist" 2>/dev/null || echo "无法读取 Version"
 
+          # App 大小
+          echo ""
+          echo "=== App 大小 ==="
+          du -sh "$APP_PATH"
+
           IPA_DIR="$RUNNER_TEMP/ipa_payload"
           rm -rf "$IPA_DIR"
           mkdir -p "$IPA_DIR/Payload"
@@ -162,11 +167,11 @@ jobs:
 
           echo ""
           echo "=== IPA 目录结构 ==="
-          ls -la "$IPA_DIR/"
           ls -la "$IPA_DIR/Payload/"
 
-          cd "$IPA_DIR"
-          zip -r "$RUNNER_TEMP/iOS-Agent.ipa" Payload
+          # 正确打包：进入 Payload 目录，只打包其内容
+          cd "$IPA_DIR/Payload"
+          zip -r "$RUNNER_TEMP/iOS-Agent.ipa" .
           echo ""
           echo "✅ IPA 生成成功！"
           echo "IPA 大小: $(du -sh $RUNNER_TEMP/iOS-Agent.ipa)"
