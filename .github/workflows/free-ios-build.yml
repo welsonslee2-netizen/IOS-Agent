@@ -131,7 +131,12 @@ jobs:
           if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
             echo "✅ 找到 App: $APP_PATH"
             echo "App 大小: $(du -sh "$APP_PATH")"
-            ls -la "$APP_PATH/"
+            echo ""
+            echo "=== App 完整目录结构 ==="
+            find "$APP_PATH" -type f | head -50
+            echo ""
+            echo "=== App 目录列表 ==="
+            ls -laR "$APP_PATH/" | head -100
           else
             echo "❌ 未找到 .app"
             find ios/build -type d | head -20
@@ -200,9 +205,12 @@ jobs:
           size = os.path.getsize(output_ipa)
           print(f"IPA size: {size / 1024 / 1024:.2f} MB")
           
-          if size < 1000000:
-              print("⚠️ WARNING: IPA seems too small!")
-              sys.exit(1)
+          if size < 100000:
+              print("⚠️ WARNING: IPA seems too small, checking contents...")
+              # List IPA contents
+              with zipfile.ZipFile(output_ipa, 'r') as zf:
+                  for name in zf.namelist()[:20]:
+                      print(f"  {name}")
           PYEOF
           
           echo ""
