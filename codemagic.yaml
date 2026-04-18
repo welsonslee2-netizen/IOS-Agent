@@ -1,0 +1,36 @@
+workflows:
+  ios-agent-workflow:
+    name: iOS Agent Build
+    instance_type: mac_mini_m2
+
+    environment:
+      vars:
+        XCODE_WORKSPACE: "iOS Agent"
+        XCODE_SCHEME: "iOS Agent"
+        BUNDLE_ID: "com.iosagent"
+      ios_signing:
+        distribution_type: ad_hoc    # ad_hoc 可生成 IPA 安装到真机
+        bundle_identifier: $BUNDLE_ID
+
+    scripts:
+      - name: 安装 Briefcase 依赖
+        script: |
+          pip install briefcase toga httpx
+
+      - name: 创建 iOS 项目
+        script: |
+          briefcase create iOS --no-input
+
+      - name: 构建 iOS 应用
+        script: |
+          briefcase build iOS --no-input
+
+    artifacts:
+      - build/iosagent/iOS/*.app
+
+    publishing:
+      # 构建完成后自动下载 IPA
+      # 如需发布 TestFlight，需在 Codemagic UI 中配置 App Store Connect API Key
+      email:
+        recipients:
+          - notify: true
