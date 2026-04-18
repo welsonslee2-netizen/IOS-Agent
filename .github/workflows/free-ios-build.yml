@@ -94,16 +94,35 @@ jobs:
             2>&1 | tee build.log
 
           echo ""
-          echo "=== 构建日志末尾 ==="
-          tail -30 build.log
+          echo "=== 构建结果检查 ==="
+          
+          # 检查是否有编译错误
+          if grep -q "error:" build.log; then
+            echo "❌ 发现编译错误："
+            grep -E "error:|warning:" build.log | head -20
+          fi
+          
+          echo ""
+          echo "=== 构建日志末尾 (最后50行) ==="
+          tail -50 build.log
 
           # 检查构建是否成功
           if grep -q "BUILD SUCCEEDED" build.log; then
             echo "✅ 构建成功"
           else
             echo "❌ 构建失败"
+            echo "=== 完整错误信息 ==="
+            grep -B2 -A5 "error:" build.log || true
             exit 1
           fi
+
+      - name: 保存构建日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: ios/build.log
+          retention-days: 30
 
       - name: 查找构建产物
         run: |
