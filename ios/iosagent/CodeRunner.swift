@@ -10,7 +10,7 @@ class CodeRunner {
     }
 
     // MARK: - Code Detection
-    private func isCodeRequest(_ text: String) -> Bool {
+    func isCodeRequest(_ text: String) -> Bool {
         let lower = text.lowercased()
         let codeKeywords = [
             "print(", "def ", "import ", "from ", "class ",
