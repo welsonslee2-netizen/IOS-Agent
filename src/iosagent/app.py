@@ -104,7 +104,8 @@ class iOSAgentApp(toga.App):
 
     async def on_sys_info(self, widget):
         """显示系统信息"""
-        import platform, sys
+        import platform
+        import sys
         info = (
             f"🖥  平台: {platform.system()} {platform.release()}\n"
             f"🐍 Python: {sys.version}\n"
