@@ -173,14 +173,15 @@ jobs:
           ls -la "$IPA_DIR/Payload/"
 
           # 使用 python 的 zipfile 模块打包，确保结构正确
-          python3 << 'PYEOF'
+          python3 << PYEOF
           import zipfile
           import os
           import sys
           
-          ipa_dir = os.environ['IPA_DIR']
-          output_ipa = os.path.join(os.environ['RUNNER_TEMP'], 'iOS-Agent.ipa')
-          app_bundle = os.environ['APP_NAME'] + '.app'
+          # 直接使用 shell 变量
+          ipa_dir = "$IPA_DIR"
+          output_ipa = os.path.join(os.environ.get('RUNNER_TEMP', '/tmp'), 'iOS-Agent.ipa')
+          app_bundle = "$APP_NAME" + '.app'
           
           with zipfile.ZipFile(output_ipa, 'w', zipfile.ZIP_DEFLATED) as zf:
               payload_path = os.path.join(ipa_dir, 'Payload')
@@ -196,7 +197,6 @@ jobs:
           print(f"\n✅ IPA created: {output_ipa}")
           
           # Check size
-          import os
           size = os.path.getsize(output_ipa)
           print(f"IPA size: {size / 1024 / 1024:.2f} MB")
           
