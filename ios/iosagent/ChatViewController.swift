@@ -72,9 +72,17 @@ class ChatViewController: UIViewController {
     private lazy var clearButton: UIButton = {
         let btn = UIButton(type: .system)
         btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.setTitle("清空对话", for: .normal)
+        btn.setTitle("清空", for: .normal)
         btn.titleLabel?.font = .systemFont(ofSize: 14)
         btn.addTarget(self, action: #selector(clearTapped), for: .touchUpInside)
+        return btn
+    }()
+    
+    private lazy var settingsButton: UIButton = {
+        let btn = UIButton(type: .system)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.setImage(UIImage(systemName: "gearshape"), for: .normal)
+        btn.addTarget(self, action: #selector(settingsTapped), for: .touchUpInside)
         return btn
     }()
 
@@ -102,6 +110,7 @@ class ChatViewController: UIViewController {
 
         // Toolbar
         toolbarView.addSubview(clearButton)
+        toolbarView.addSubview(settingsButton)
         view.addSubview(toolbarView)
 
         // Main content
@@ -121,6 +130,11 @@ class ChatViewController: UIViewController {
 
             clearButton.centerYAnchor.constraint(equalTo: toolbarView.centerYAnchor),
             clearButton.trailingAnchor.constraint(equalTo: toolbarView.trailingAnchor, constant: -16),
+
+            settingsButton.centerYAnchor.constraint(equalTo: toolbarView.centerYAnchor),
+            settingsButton.leadingAnchor.constraint(equalTo: toolbarView.leadingAnchor, constant: 16),
+            settingsButton.widthAnchor.constraint(equalToConstant: 44),
+            settingsButton.heightAnchor.constraint(equalToConstant: 44),
 
             tableView.topAnchor.constraint(equalTo: toolbarView.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -190,6 +204,19 @@ class ChatViewController: UIViewController {
         messages.removeAll()
         addWelcomeMessage()
         tableView.reloadData()
+    }
+    
+    @objc private func settingsTapped() {
+        let settingsVC = SettingsViewController()
+        let navController = UINavigationController(rootViewController: settingsVC)
+        navController.modalPresentationStyle = .pageSheet
+        
+        if let sheet = navController.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        
+        present(navController, animated: true)
     }
 
     @objc private func keyboardWillShow(_ notification: Notification) {
