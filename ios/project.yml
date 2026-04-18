@@ -1,6 +1,6 @@
 name: iosagent
 options:
-  bundleIdPrefix: com.iosagent
+  bundleIdPrefix: com.welsonslee
   deploymentTarget:
     iOS: "15.0"
   xcodeVersion: "15.0"
@@ -28,7 +28,7 @@ targets:
           - "**/.DS_Store"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.iosagent.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.welsonslee.iosagent
         INFOPLIST_FILE: iosagent/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
