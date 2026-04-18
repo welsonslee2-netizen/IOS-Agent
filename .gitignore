@@ -50,3 +50,10 @@ tmp/
 temp/
 *.tmp
 *.log
+
+# WorkBuddy 工作记忆（仅本地使用）
+.workbuddy/
+
+# 辅助脚本
+*.bat
+setup*.bat
