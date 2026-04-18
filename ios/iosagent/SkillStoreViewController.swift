@@ -105,7 +105,7 @@ class SkillStoreViewController: UIViewController {
         let button = UIButton(type: .system)
         button.setTitle(title, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
-        button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, top: 8, bottom: 8)
+        button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, top: 8, bottom: 16)
         button.layer.cornerRadius = 16
         button.tag = category?.hashValue ?? -1
         button.addTarget(self, action: #selector(categoryTapped(_:)), for: .touchUpInside)
