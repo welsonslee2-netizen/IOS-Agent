@@ -40,20 +40,15 @@ jobs:
           echo "=== Xcode ==="
           xcodebuild -version
           xcode-select --print-path
-          echo ""
-          echo "=== 可用模拟器 ==="
-          xcrun simctl list devices available | grep -E "iPhone" | head -5
 
-      - name: 安装 XcodeGen
+      - name: 安装工具
         run: |
-          which xcodegen || echo "需要安装 XcodeGen"
-          brew install xcodegen 2>/dev/null || {
-            echo "Homebrew 安装失败，尝试直接下载..."
-            curl -sL https://github.com/SnapKit/XcodeGen/releases/download/2.39.0/xcodegen-macos.zip -o xcodegen.zip
-            unzip -o xcodegen.zip -d /usr/local/bin/
-            chmod +x /usr/local/bin/xcodegen
-          }
+          # 安装 XcodeGen
+          brew install xcodegen || true
           xcodegen --version
+          # 安装 ldid（用于伪签名，让 Sideloadly 能处理）
+          brew install ldid || true
+          which ldid && ldid || true
 
       - name: 生成 Xcode 项目
         run: |
@@ -61,7 +56,6 @@ jobs:
           xcodegen generate
           echo "=== 生成的项目 ==="
           ls -la
-          ls -la iosagent/ 2>/dev/null || true
 
       - name: 列出可用 Scheme
         run: |
@@ -78,40 +72,39 @@ jobs:
           SCHEME=$(xcodebuild -project "$XCODEPROJ" -list 2>/dev/null | grep -A1 "Schemes:" | tail -1 | tr -d ' ')
           echo "构建 Scheme: $SCHEME"
 
-          # 构建为真机版本（arm64 for iPhone, NOT simulator x86_64）
+          # 构建真机版本 arm64，允许签名（AD_HOC）使得 ldid 可以工作
           xcodebuild -project "$XCODEPROJ" \
             -scheme "$SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_IDENTITY="-" \
             DEVELOPMENT_TEAM="" \
             IPHONEOS_DEPLOYMENT_TARGET="15.0" \
             ARCHS="arm64" \
             VALID_ARCHS="arm64" \
+            ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
+            DEAD_CODE_STRIPPING=NO \
+            STRIP_INSTALLED_PRODUCT=NO \
             2>&1 | tee build.log
 
           echo ""
           echo "=== 构建结果检查 ==="
-          
-          # 检查是否有编译错误
           if grep -q "error:" build.log; then
-            echo "❌ 发现编译错误："
-            grep -E "error:|warning:" build.log | head -20
+            echo "⚠️ 发现编译错误："
+            grep "error:" build.log | head -20
           fi
-          
-          echo ""
-          echo "=== 构建日志末尾 (最后50行) ==="
-          tail -50 build.log
 
-          # 检查构建是否成功
+          echo ""
+          echo "=== 构建日志末尾 (最后30行) ==="
+          tail -30 build.log
+
           if grep -q "BUILD SUCCEEDED" build.log; then
             echo "✅ 构建成功"
           else
             echo "❌ 构建失败"
-            echo "=== 完整错误信息 ==="
             grep -B2 -A5 "error:" build.log || true
             exit 1
           fi
@@ -124,98 +117,77 @@ jobs:
           path: ios/build.log
           retention-days: 30
 
-      - name: 查找构建产物
+      - name: 查找构建产物并诊断
         run: |
           APP_PATH=$(find ios/build -name "*.app" -type d 2>/dev/null | head -1)
-          echo "APP_PATH=$APP_PATH"
           if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
             echo "✅ 找到 App: $APP_PATH"
             echo "App 大小: $(du -sh "$APP_PATH")"
             echo ""
-            echo "=== App 完整目录结构 ==="
-            find "$APP_PATH" -type f | head -50
-            echo ""
-            echo "=== App 目录列表 ==="
-            ls -laR "$APP_PATH/" | head -100
+            echo "=== App 完整文件列表 ==="
+            find "$APP_PATH" -type f
           else
             echo "❌ 未找到 .app"
-            find ios/build -type d | head -20
+            find ios/build -type d | head -30
             exit 1
           fi
 
-      - name: 打包 IPA
-        env:
-          APP_NAME: iosagent
+      - name: 伪签名 + 打包 IPA
         run: |
-          # 找到 .app 路径
           APP_PATH=$(find ios/build -name "*.app" -type d 2>/dev/null | head -1)
+          APP_BUNDLE=$(basename "$APP_PATH")
+          APP_NAME="${APP_BUNDLE%.app}"
+          EXECUTABLE="$APP_PATH/$APP_NAME"
 
-          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "❌ 未找到 .app 文件"
-            exit 1
+          echo "✅ App: $APP_PATH"
+          echo "Executable: $EXECUTABLE"
+
+          # ── 伪签名（让 Sideloadly 能正常处理）──
+          if [ -f "$EXECUTABLE" ]; then
+            echo "=== 对可执行文件进行伪签名 ==="
+            ldid -S "$EXECUTABLE" && echo "✅ ldid 签名成功" || echo "⚠️ ldid 签名失败（继续）"
           fi
 
-          echo "✅ 找到 App: $APP_PATH"
-          
-          # 获取 App 名称
-          APP_BUNDLE_NAME=$(basename "$APP_PATH")
-          echo "App Bundle Name: $APP_BUNDLE_NAME"
-          
-          # App 大小
-          echo "=== App 大小 ==="
-          du -sh "$APP_PATH"
+          # 也对 Frameworks 里的二进制做伪签名
+          find "$APP_PATH/Frameworks" -type f -name "*.dylib" 2>/dev/null | while read f; do
+            echo "  signing: $f"
+            ldid -S "$f" || true
+          done
 
-          # 创建打包目录
+          # ── 用 zip 打包 IPA ──
           IPA_DIR="$RUNNER_TEMP/ios_ipa"
+          OUTPUT_IPA="$RUNNER_TEMP/iOS-Agent.ipa"
           rm -rf "$IPA_DIR"
           mkdir -p "$IPA_DIR/Payload"
-          
-          # 复制 App 到 Payload
+
           cp -R "$APP_PATH" "$IPA_DIR/Payload/"
-          
+
           echo ""
           echo "=== Payload 结构 ==="
           ls -la "$IPA_DIR/Payload/"
 
-          # 使用 python 的 zipfile 模块打包，确保结构正确
-          python3 << PYEOF
-          import zipfile
-          import os
-          import sys
-          
-          # 直接使用 shell 变量
-          ipa_dir = "$IPA_DIR"
-          output_ipa = os.path.join(os.environ.get('RUNNER_TEMP', '/tmp'), 'iOS-Agent.ipa')
-          app_bundle = "$APP_NAME" + '.app'
-          
-          with zipfile.ZipFile(output_ipa, 'w', zipfile.ZIP_DEFLATED) as zf:
-              payload_path = os.path.join(ipa_dir, 'Payload')
-              app_path = os.path.join(payload_path, app_bundle)
-              
-              for root, dirs, files in os.walk(app_path):
-                  for file in files:
-                      file_path = os.path.join(root, file)
-                      arcname = os.path.join('Payload', app_bundle, os.path.relpath(file_path, app_path))
-                      zf.write(file_path, arcname)
-                      print(f"  Added: {arcname}")
-          
-          print(f"\n✅ IPA created: {output_ipa}")
-          
-          # Check size
-          size = os.path.getsize(output_ipa)
-          print(f"IPA size: {size / 1024 / 1024:.2f} MB")
-          
-          if size < 100000:
-              print("⚠️ WARNING: IPA seems too small, checking contents...")
-              # List IPA contents
-              with zipfile.ZipFile(output_ipa, 'r') as zf:
-                  for name in zf.namelist()[:20]:
-                      print(f"  {name}")
-          PYEOF
-          
+          # 用 ditto 保留权限打包（macOS 原生，最可靠）
+          cd "$IPA_DIR"
+          ditto -c -k --sequesterRsrc --keepParent Payload "$OUTPUT_IPA"
+
           echo ""
+          echo "=== IPA 信息 ==="
+          ls -lah "$OUTPUT_IPA"
+
+          IPA_SIZE=$(stat -f%z "$OUTPUT_IPA")
+          echo "IPA 大小: $((IPA_SIZE / 1024)) KB"
+
+          if [ "$IPA_SIZE" -lt 50000 ]; then
+            echo "❌ IPA 太小，打包可能有问题"
+            exit 1
+          fi
+
           echo "✅ IPA 打包完成"
-          ls -la "$RUNNER_TEMP/iOS-Agent.ipa"
+
+          # 验证 IPA 内容
+          echo ""
+          echo "=== IPA 内容验证 ==="
+          unzip -l "$OUTPUT_IPA" | head -20
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
