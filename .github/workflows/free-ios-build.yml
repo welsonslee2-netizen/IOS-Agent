@@ -72,15 +72,17 @@ jobs:
           SCHEME=$(xcodebuild -project "$XCODEPROJ" -list 2>/dev/null | grep -A1 "Schemes:" | tail -1 | tr -d ' ')
           echo "构建 Scheme: $SCHEME"
 
-          # 构建真机版本 arm64，允许签名（AD_HOC）使得 ldid 可以工作
+          # 构建真机版本 arm64
+          # iOS 18.5 SDK 不允许 Ad Hoc，必须完全禁用签名，构建后再用 ldid 伪签名
           xcodebuild -project "$XCODEPROJ" \
             -scheme "$SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             IPHONEOS_DEPLOYMENT_TARGET="15.0" \
             ARCHS="arm64" \
