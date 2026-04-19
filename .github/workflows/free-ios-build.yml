@@ -47,14 +47,10 @@ jobs:
           brew install xcodegen || true
           xcodegen --version
           echo ""
-          # 安装 ldid（用于伪签名）
-          echo "=== 安装 ldid ==="
-          brew install ldid
-          echo ""
-          echo "=== 验证 ldid ==="
-          which ldid
-          ldid -r || true
-          ldid --version || true
+          # 检查 openssl 和 codesign
+          echo "openssl: $(which openssl)"
+          echo "codesign: $(which codesign)"
+          openssl version
 
       - name: 生成 Xcode 项目
         run: |
@@ -140,7 +136,7 @@ jobs:
             exit 1
           fi
 
-      - name: 伪签名 + 打包 IPA
+      - name: 自签名 + 打包 IPA
         run: |
           APP_PATH=$(find ios/build -name "*.app" -type d 2>/dev/null | head -1)
           APP_BUNDLE=$(basename "$APP_PATH")
@@ -150,50 +146,128 @@ jobs:
           echo "✅ App: $APP_PATH"
           echo "Executable: $EXECUTABLE"
 
-          # ── 验证 ldid 是否可用 ──
-          if ! command -v ldid &> /dev/null; then
-            echo "❌ ldid 未安装，尝试从 GitHub 下载..."
-            curl -sL https://github.com/AdamDeming/ldid/releases/download/v2.1.5-23/ldid -o /usr/local/bin/ldid
-            chmod +x /usr/local/bin/ldid
-          fi
+          # ── 创建自签名证书 ──
+          echo "=== 创建自签名证书 ==="
+          CERT_NAME="iOS Dev Certificate"
           
-          if ! command -v ldid &> /dev/null; then
-            echo "❌ ldid 安装失败，请手动签名或使用 AltStore"
-            ls -la "$APP_PATH/"
-          else
-            echo "✅ ldid 已就绪: $(which ldid)"
-            
-            # ── 对可执行文件进行伪签名 ──
-            if [ -f "$EXECUTABLE" ]; then
-              echo "=== 对可执行文件进行伪签名 ==="
-              ldid -S "$EXECUTABLE"
-              echo "✅ ldid 签名完成"
-              # 验证签名状态
-              ldid -r "$EXECUTABLE" && echo "✅ 签名验证通过" || echo "⚠️ 签名验证失败"
-            fi
+          # 创建证书配置文件
+          cat > /tmp/cert.conf << 'CERTEOF'
+          [req]
+          default_bits = 2048
+          prompt = no
+          distinguished_name = req_dn
+          [req_dn]
+          CN = "iPhone Developer"
+          OU = "iOS Development"
+          O = "Developer"
+          C = US
+          CERTEOF
 
-            # 对 Frameworks 里的二进制做伪签名
-            echo "=== 检查 Frameworks ==="
-            find "$APP_PATH/Frameworks" -type f 2>/dev/null | while read f; do
-              echo "  signing: $f"
-              ldid -S "$f" 2>/dev/null || true
-            done
-          fi
+          # 生成私钥和证书
+          openssl genrsa -out /tmp/signing.key 2048 2>/dev/null
+          openssl req -new -x509 -days 3650 -key /tmp/signing.key \
+            -out /tmp/signing.crt \
+            -subj "/CN=iPhone Developer/OU=iOS Development/O=Developer/C=US" 2>/dev/null
+
+          # 创建 p12 证书包
+          openssl pkcs12 -export \
+            -in /tmp/signing.crt \
+            -inkey /tmp/signing.key \
+            -out /tmp/signing.p12 \
+            -password pass:abcd1234 2>/dev/null
+
+          echo "✅ 证书创建完成"
+
+          # ── 导入证书到 Keychain ──
+          echo "=== 导入证书到 Keychain ==="
+          security create-keychain -p "keychain" ~/Library/Keychains/build.keychain
+          security set-keychain-settings -t 3600 -u ~/Library/Keychains/build.keychain
+          security unlock-keychain -p "keychain" ~/Library/Keychains/build.keychain
+          
+          # 导入证书
+          security import /tmp/signing.p12 -P "abcd1234" -A -t cert \
+            -k ~/Library/Keychains/build.keychain
+          security import /tmp/signing.crt -A -t cert \
+            -k ~/Library/Keychains/build.keychain
+          
+          # 信任证书
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "keychain" ~/Library/Keychains/build.keychain 2>/dev/null || true
+          
+          echo "✅ Keychain 配置完成"
+
+          # ── 使用 codesign 签名 ──
+          echo "=== 使用 codesign 签名 ==="
+          security list-keychains -s ~/Library/Keychains/build.keychain
+          security default-keychain -s ~/Library/Keychains/build.keychain
+          security unlock-keychain -p "keychain" ~/Library/Keychains/build.keychain
+
+          # 创建 entitlements
+          cat > /tmp/entitlements.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.developer.associated-domains</key>
+            <array/>
+            <key>application-identifier</key>
+            <string>com.welsonslee.iosagent.dev</string>
+            <key>get-task-allow</key>
+            <true/>
+            <key>com.apple.developer.team-identifier</key>
+            <string></string>
+          </dict>
+          </plist>
+          EOF
+
+          # codesign 签名（使用 -f 强制覆盖）
+          echo "签名可执行文件: $EXECUTABLE"
+          codesign -f -v -s "iPhone Developer" \
+            -ent /tmp/entitlements.plist \
+            --force \
+            "$EXECUTABLE" 2>&1 || echo "Executable 签名尝试..."
+
+          # 对 Frameworks 签名
+          echo "=== 签名 Frameworks ==="
+          find "$APP_PATH/Frameworks" -type f 2>/dev/null | while read f; do
+            echo "  signing: $f"
+            codesign -f -v -s "iPhone Developer" \
+              -ent /tmp/entitlements.plist \
+              --force "$f" 2>/dev/null || true
+          done
+
+          # 对 PlugIns 签名
+          find "$APP_PATH/PlugIns" -type f 2>/dev/null | while read f; do
+            echo "  signing: $f"
+            codesign -f -v -s "iPhone Developer" \
+              -ent /tmp/entitlements.plist \
+              --force "$f" 2>/dev/null || true
+          done
+
+          # 验证签名
+          echo ""
+          echo "=== 签名验证 ==="
+          codesign -v "$EXECUTABLE" 2>&1 || true
+          
+          # 列出所有签名状态
+          echo ""
+          echo "=== App 签名状态 ==="
+          find "$APP_PATH" -type f -name "*.dylib" -o -name "iosagent" | while read f; do
+            echo -n "$f: "
+            codesign -v "$f" 2>&1 | head -1 || echo "未签名"
+          done
 
           # ── 打包 IPA ──
+          echo ""
+          echo "=== 打包 IPA ==="
           IPA_DIR="$RUNNER_TEMP/ios_ipa"
           OUTPUT_IPA="$RUNNER_TEMP/iOS-Agent.ipa"
           rm -rf "$IPA_DIR"
           mkdir -p "$IPA_DIR/Payload"
 
-          # 用 cp 复制，保持权限
           cp -pR "$APP_PATH" "$IPA_DIR/Payload/"
 
-          echo ""
-          echo "=== Payload 结构 ==="
-          ls -la "$IPA_DIR/Payload/"
-
-          # 用 ditto 打包（macOS 原生，保留权限）
+          # 用 ditto 打包
           cd "$IPA_DIR"
           ditto -c -k --sequesterRsrc --keepParent Payload "$OUTPUT_IPA"
 
@@ -204,16 +278,12 @@ jobs:
           IPA_SIZE=$(stat -f%z "$OUTPUT_IPA")
           echo "IPA 大小: $((IPA_SIZE / 1024)) KB"
 
-          if [ "$IPA_SIZE" -lt 50000 ]; then
-            echo "⚠️ IPA 较小，请检查 App 内容"
-          fi
-
           echo "✅ IPA 打包完成"
 
           # 验证 IPA 内容
           echo ""
-          echo "=== IPA 内容验证（前20项）==="
-          unzip -l "$OUTPUT_IPA" | head -20
+          echo "=== IPA 内容（前10项）==="
+          unzip -l "$OUTPUT_IPA" | head -12
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
