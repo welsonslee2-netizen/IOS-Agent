@@ -119,6 +119,15 @@ class ChatViewController: UIViewController {
         setupUI()
         setupKeyboardObservers()
         addWelcomeMessage()
+        
+        // 点击背景收回键盘
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tapGesture.cancelsTouchesInView = false
+        tableView.addGestureRecognizer(tapGesture)
+    }
+    
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
     }
     
     deinit {
@@ -151,13 +160,13 @@ class ChatViewController: UIViewController {
         inputContainer.addSubview(sendButton)
         inputContainer.addSubview(placeholderLabel)
         
-        inputContainerBottom = inputContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        inputContainerBottom = inputContainer.bottomAnchor.constraint(equalTo: toolbarView.bottomAnchor, constant: -4)
         
         NSLayoutConstraint.activate([
-            // toolbarView 从 safeArea 底部向上延伸
-            toolbarView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -120),
+            // toolbarView 固定在底部，底部对齐 safe area
             toolbarView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbarView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            toolbarView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             toolbarView.heightAnchor.constraint(equalToConstant: 120),
             
             // quickActionsStack 固定高度
@@ -289,7 +298,7 @@ class ChatViewController: UIViewController {
         }
         
         let keyboardHeight = keyboardFrame.height - view.safeAreaInsets.bottom
-        inputContainerBottom?.constant = -keyboardHeight
+        inputContainerBottom?.constant = -keyboardHeight - 8
         
         UIView.animate(withDuration: duration) {
             self.view.layoutIfNeeded()
@@ -301,7 +310,7 @@ class ChatViewController: UIViewController {
         guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
             return
         }
-        inputContainerBottom?.constant = 0
+        inputContainerBottom?.constant = -4
         
         UIView.animate(withDuration: duration) {
             self.view.layoutIfNeeded()
