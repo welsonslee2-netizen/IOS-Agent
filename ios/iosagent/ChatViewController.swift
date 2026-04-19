@@ -323,13 +323,12 @@ class ChatViewController: UIViewController {
         // Check for code execution request
         if codeRunner.isCodeRequest(text) {
             addLoadingMessage()
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let response = self?.codeRunner.run(text: text) ?? "⚠️ 运行器初始化失败"
-                
-                DispatchQueue.main.async {
-                    self?.removeLoadingMessage()
-                    self?.addAssistantMessage(response)
-                }
+            // 获取 API Key
+            let apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
+            
+            codeRunner.run(text: text, apiKey: apiKey) { [weak self] response in
+                self?.removeLoadingMessage()
+                self?.addAssistantMessage(response)
             }
             return
         }
