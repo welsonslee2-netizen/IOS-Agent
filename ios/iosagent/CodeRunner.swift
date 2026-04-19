@@ -102,8 +102,8 @@ class CodeRunner {
         let body: [String: Any] = [
             "model": "gpt-3.5-turbo",
             "messages": [
-                {"role": "system", "content": "你是一个 Python 代码执行器。用户给你代码，你要返回执行结果。如果代码有语法错误，返回错误信息。"},
-                {"role": "user", "content": prompt}
+                ["role": "system", "content": "你是一个 Python 代码执行器。用户给你代码，你要返回执行结果。如果代码有语法错误，返回错误信息。"],
+                ["role": "user", "content": prompt]
             ],
             "temperature": 0.1,
             "max_tokens": 1000

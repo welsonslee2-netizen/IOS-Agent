@@ -62,3 +62,12 @@ src/iosagent/                # （旧版 BeeWare 源码，暂时保留）
 - Briefcase CI 失败：exit code 100，因为需要 Xcode GUI 会话 → 改用 XcodeGen + xcodebuild
 - Ruff 检查失败：未使用的 import → 删除即可
 - 推送脚本路径含空格 → 使用 `cd /d "D:\IOS Agent"`
+- security import PKCS12 失败：macOS 不支持该格式 → 使用 `security pkcs12` 或分开导入私钥/证书
+- App 图标白边：原图本身有白色背景 → 裁剪成正方形后缩放
+- iOS 无法直接运行 Python：改用云端执行（通过 AI API）或本地模拟执行
+
+## Python 执行方案
+iOS 原生 App 无法直接运行 Python，采用双轨方案：
+1. **云端执行**：配置 API Key 后，通过 OpenAI API 执行 Python 代码
+2. **本地模拟**：支持 print()、for 循环等常见语法，输出分析结果
+- CodeRunner.swift 已重构，支持异步执行和云端调用

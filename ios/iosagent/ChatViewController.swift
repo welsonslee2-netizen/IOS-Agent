@@ -204,19 +204,14 @@ class ChatViewController: UIViewController {
     }
     
     private func createToolbarButton(icon: String, title: String) -> UIButton {
-        let btn = UIButton(type: .system)
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: icon, withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .medium))
+        config.title = title
+        config.imagePadding = 4
+        config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+        
+        let btn = UIButton(configuration: config)
         btn.translatesAutoresizingMaskIntoConstraints = false
-        
-        // 使用 SF Symbols 图标
-        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
-        btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
-        btn.setTitle(title, for: .normal)
-        btn.titleLabel?.font = .systemFont(ofSize: 12, weight: .medium)
-        
-        // 水平和垂直布局
-        btn.configuration = nil  // 清除 configuration，使用传统方式
-        btn.contentEdgeInsets = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        btn.titleEdgeInsets = UIEdgeInsets(top: 0, left: 4, bottom: 0, right: -4)
         
         return btn
     }
